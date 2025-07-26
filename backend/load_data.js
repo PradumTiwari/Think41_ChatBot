@@ -1,116 +1,131 @@
-const fs = require("fs");
-const path = require("path");
-const { parse } = require("csv-parse/sync");
-const { PrismaClient } = require("@prisma/client");
+const fs = require('fs');
+const path = require('path');
+const csv = require('csv-parser');
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-const DATA_FOLDER = path.join(__dirname, "data");
-const BATCH_SIZE = 100; // Insert in chunks for performance
+const BATCH_SIZE = 1000;
 
-// Load CSV and parse to JSON
-function loadCSV(filePath) {
-  if (!fs.existsSync(filePath)) {
-    console.warn(`⚠️ File not found: ${filePath}`);
-    return [];
-  }
-
-  const content = fs.readFileSync(filePath);
-  return parse(content, {
-    columns: true,
-    skip_empty_lines: true,
-    trim: true,
+function loadCSV(fileName) {
+  return new Promise((resolve, reject) => {
+    const rows = [];
+    fs.createReadStream(path.join(__dirname, 'data', fileName))
+      .pipe(csv())
+      .on('data', (row) => rows.push(row))
+      .on('end', () => resolve(rows))
+      .on('error', reject);
   });
 }
 
-// Bulk insert data with error tolerance
-async function loadTable(table, fileName, mapper) {
-  const filePath = path.join(DATA_FOLDER, fileName);
-  const rows = loadCSV(filePath);
-
-  if (rows.length === 0) {
-    console.warn(`⚠️ No rows to import for ${table}`);
-    return;
-  }
-
-  const mapped = rows.map(mapper);
-  let successCount = 0;
-  let failCount = 0;
-
-  for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
-    const chunk = mapped.slice(i, i + BATCH_SIZE);
+async function insertInBatches(data, mapper, model) {
+  for (let i = 0; i < data.length; i += BATCH_SIZE) {
+    const batch = data.slice(i, i + BATCH_SIZE).map(mapper);
     try {
-      await prisma[table].createMany({
-        data: chunk,
-        skipDuplicates: true, // optional: skip duplicates
-      });
-      successCount += chunk.length;
-    } catch (error) {
-      // fallback to individual inserts for better error logs
-      for (const row of chunk) {
-        try {
-          await prisma[table].create({ data: row });
-          successCount++;
-        } catch (err) {
-          failCount++;
-          console.error(`❌ Error inserting into ${table}:`, err.message);
-        }
-      }
+      await prisma[model].createMany({ data: batch, skipDuplicates: true });
+      console.log(`✅ Inserted ${Math.min(i + BATCH_SIZE, data.length)} / ${data.length} into ${model}`);
+    } catch (err) {
+      console.error(`❌ Error inserting into ${model}:`, err);
     }
   }
-
-  console.log(`✅ Loaded ${successCount} rows into ${table}${failCount ? `, ${failCount} failed.` : ""}`);
 }
 
-// === RUN ALL LOADERS IN ORDER ===
-async function main() {
-  await loadTable("distributionCenter", "distribution_centers.csv", (row) => ({
-    id: row.id,
-    name: row.name,
-    location: row.location,
-  }));
+async function seed() {
+  try {
+    // 1. Distribution Centers
+    const dcRows = await loadCSV('distribution_centers.csv');
+    await insertInBatches(dcRows, (r) => ({
+      id: parseInt(r.id),
+      name: r.name,
+      latitude: parseFloat(r.latitude),
+      longitude: parseFloat(r.longitude),
+    }), 'distributionCenter');
 
-  await loadTable("user", "users.csv", (row) => ({
-    id: row.id,
-    name: row.name,
-    email: row.email,
-    address: row.address,
-    phone: row.phone,
-  }));
+    // 2. Users
+    const userRows = await loadCSV('users.csv');
+    await insertInBatches(userRows, (u) => ({
+      id: parseInt(u.id),
+      first_name: u.first_name,
+      last_name: u.last_name,
+      email: u.email,
+      age: parseInt(u.age),
+      gender: u.gender,
+      state: u.state,
+      street_address: u.street_address,
+      postal_code: u.postal_code,
+      city: u.city,
+      country: u.country,
+      latitude: parseFloat(u.latitude),
+      longitude: parseFloat(u.longitude),
+      traffic_source: u.traffic_source,
+      created_at: new Date(u.created_at),
+    }), 'user');
 
-  await loadTable("product", "products.csv", (row) => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    price: parseFloat(row.price),
-    category: row.category,
-  }));
+    // 3. Products
+    const productRows = await loadCSV('products.csv');
+    await insertInBatches(productRows, (p) => ({
+      id: parseInt(p.id),
+      cost: parseFloat(p.cost),
+      category: p.category,
+      name: p.name,
+      brand: p.brand,
+      retail_price: parseFloat(p.retail_price),
+      department: p.department,
+      sku: p.sku,
+      distribution_center_id: parseInt(p.distribution_center_id),
+    }), 'product');
 
-  await loadTable("order", "orders.csv", (row) => ({
-    id: row.id,
-    user_id: row.user_id,
-    status: row.status,
-    created_at: new Date(row.created_at),
-  }));
+    // 4. Inventory Items
+    const inventoryRows = await loadCSV('inventory_items.csv');
+    await insertInBatches(inventoryRows, (i) => ({
+      id: parseInt(i.id),
+      product_id: parseInt(i.product_id),
+      created_at: new Date(i.created_at),
+      sold_at: i.sold_at ? new Date(i.sold_at) : null,
+      cost: parseFloat(i.cost),
+      product_category: i.product_category,
+      product_name: i.product_name,
+      product_brand: i.product_brand,
+      product_retail_price: parseFloat(i.product_retail_price),
+      product_department: i.product_department,
+      product_sku: i.product_sku,
+      product_distribution_center_id: parseInt(i.product_distribution_center_id),
+    }), 'inventoryItem');
 
-  await loadTable("inventoryItem", "inventory_items.csv", (row) => ({
-    id: row.id,
-    product_id: row.product_id,
-    distribution_center_id: row.distribution_center_id,
-    quantity: parseInt(row.quantity),
-  }));
+    // 5. Orders
+    const orderRows = await loadCSV('orders.csv');
+    await insertInBatches(orderRows, (o) => ({
+      order_id: parseInt(o.order_id),
+      user_id: parseInt(o.user_id),
+      status: o.status,
+      gender: o.gender,
+      created_at: new Date(o.created_at),
+      returned_at: o.returned_at ? new Date(o.returned_at) : null,
+      shipped_at: o.shipped_at ? new Date(o.shipped_at) : null,
+      delivered_at: o.delivered_at ? new Date(o.delivered_at) : null,
+      num_of_item: parseInt(o.num_of_item),
+    }), 'order');
 
-  await loadTable("orderItem", "order_items.csv", (row) => ({
-    id: row.id,
-    order_id: row.order_id,
-    product_id: row.product_id,
-    quantity: parseInt(row.quantity),
-    price: parseFloat(row.price),
-  }));
+    // 6. Order Items
+    const orderItemRows = await loadCSV('order_items.csv');
+    await insertInBatches(orderItemRows, (oi) => ({
+      id: parseInt(oi.id),
+      order_id: parseInt(oi.order_id),
+      user_id: parseInt(oi.user_id),
+      product_id: parseInt(oi.product_id),
+      inventory_item_id: parseInt(oi.inventory_item_id),
+      status: oi.status,
+      created_at: new Date(oi.created_at),
+      shipped_at: oi.shipped_at ? new Date(oi.shipped_at) : null,
+      delivered_at: oi.delivered_at ? new Date(oi.delivered_at) : null,
+      returned_at: oi.returned_at ? new Date(oi.returned_at) : null,
+    }), 'orderItem');
 
-  await prisma.$disconnect();
+    console.log('✅ All data seeded quickly using batches!');
+  } catch (err) {
+    console.error('❌ Seed failed:', err);
+  } finally {
+    await prisma.$disconnect();
+  }
 }
 
-main().catch((e) => {
-  console.error("🚨 Fatal Error:", e);
-  prisma.$disconnect();
-});
+seed();

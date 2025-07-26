@@ -3,7 +3,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql" // or "mysql" if you're using MySQL
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -31,58 +31,58 @@ model Product {
 }
 
 model InventoryItem {
-  id                           Int      @id
-  product_id                   Int
-  created_at                   DateTime
-  sold_at                      DateTime?
-  cost                         Float
-  product_category             String
-  product_name                 String
-  product_brand                String
-  product_retail_price         Float
-  product_department           String
-  product_sku                  String
+  id                             Int      @id
+  product_id                     Int
+  created_at                     DateTime
+  sold_at                        DateTime?
+  cost                           Float
+  product_category               String
+  product_name                   String
+  product_brand                  String
+  product_retail_price           Float
+  product_department             String
+  product_sku                    String
   product_distribution_center_id Int
-  product                      Product   @relation(fields: [product_id], references: [id])
-  orderItems                   OrderItem[]
+  product                        Product   @relation(fields: [product_id], references: [id])
+  orderItems                     OrderItem[]
 }
 
 model Order {
-  order_id      Int       @id
-  user_id       Int
-  status        String
-  gender        String
-  created_at    DateTime
-  returned_at   DateTime?
-  shipped_at    DateTime?
-  delivered_at  DateTime?
-  num_of_item   Int
-  user          User      @relation(fields: [user_id], references: [id])
-  orderItems    OrderItem[]
+  order_id     Int       @id
+  user_id      Int
+  status       String
+  gender       String
+  created_at   DateTime
+  returned_at  DateTime?
+  shipped_at   DateTime?
+  delivered_at DateTime?
+  num_of_item  Int
+  user         User      @relation(fields: [user_id], references: [id])
+  orderItems   OrderItem[]
 }
 
 model OrderItem {
-  id               Int       @id
-  order_id         Int
-  user_id          Int
-  product_id       Int
+  id                Int            @id
+  order_id          Int
+  user_id           Int
+  product_id        Int
   inventory_item_id Int
-  status           String
-  created_at       DateTime
-  shipped_at       DateTime?
-  delivered_at     DateTime?
-  returned_at      DateTime?
-  order            Order     @relation(fields: [order_id], references: [order_id])
-  product          Product   @relation(fields: [product_id], references: [id])
-  inventoryItem    InventoryItem @relation(fields: [inventory_item_id], references: [id])
-  user             User      @relation(fields: [user_id], references: [id])
+  status            String
+  created_at        DateTime
+  shipped_at        DateTime?
+  delivered_at      DateTime?
+  returned_at       DateTime?
+  order             Order          @relation(fields: [order_id], references: [order_id])
+  product           Product        @relation(fields: [product_id], references: [id])
+  inventoryItem     InventoryItem @relation(fields: [inventory_item_id], references: [id])
+  user              User           @relation(fields: [user_id], references: [id])
 }
 
 model User {
-  id             Int       @id
+  id             Int           @id
   first_name     String
   last_name      String
-  email          String    @unique
+  email          String        @unique
   age            Int
   gender         String
   state          String
@@ -96,4 +96,27 @@ model User {
   created_at     DateTime
   orders         Order[]
   orderItems     OrderItem[]
+  chatSessions   ChatSession[]
+}
+
+model ChatSession {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  startedAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id])
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id         Int          @id @default(autoincrement())
+  sessionId  Int
+  sender     MessageSender
+  content    String
+  timestamp  DateTime     @default(now())
+  session    ChatSession  @relation(fields: [sessionId], references: [id])
+}
+
+enum MessageSender {
+  USER
+  AI
 }
